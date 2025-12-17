@@ -35,7 +35,7 @@ class GO1RoughCfg( LeggedRobotCfg ):
     class env( LeggedRobotCfg.env ):
         num_envs = 4096
         include_history_steps = None  # Number of steps of history to include.
-        num_observations = 230  # 235 - 5 (remove base lin vel 3 + cmd lin x/y 2)
+        num_observations = 232  # 235 - 3 (removed linear velocity)
         num_privileged_obs = 235
         reference_state_initialization = False
         # reference_state_initialization_prob = 0.85
@@ -85,6 +85,7 @@ class GO1RoughCfg( LeggedRobotCfg ):
             dof_pos_limits = -10.0
 
 class GO1RoughCfgPPO( LeggedRobotCfgPPO ):
+
     class algorithm( LeggedRobotCfgPPO.algorithm ):
         entropy_coef = 0.01
     class runner( LeggedRobotCfgPPO.runner ):

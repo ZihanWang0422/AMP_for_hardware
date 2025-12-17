@@ -39,7 +39,7 @@ class GO1AMPCfg( LeggedRobotCfg ):
     class env( LeggedRobotCfg.env ):
         num_envs = 4096
         include_history_steps = None  # Number of steps of history to include.
-        num_observations = 43  # 48 - 5 (remove base lin vel 3 + cmd lin x/y 2)
+        num_observations = 45  # 42 (removed linear velocity)
         num_privileged_obs = 48
         reference_state_initialization = True
         reference_state_initialization_prob = 0.85
@@ -137,9 +137,16 @@ class GO1AMPCfg( LeggedRobotCfg ):
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 10. # time before command are changed[s]
         heading_command = False # if true: compute ang vel command from heading error
+        
+        # Smooth command changes to simulate joystick input (important for Sim2Sim deployment)
+        # When set to True, commands will smoothly transition within resampling_time instead of step changes
+        smooth_command_changes = True  # Enable smooth transition
+        smooth_command_alpha = 0.97    # Smoothing coefficient: new_cmd = alpha * old_cmd + (1-alpha) * target_cmd
+                                       # Higher alpha means smoother, recommended 0.9-0.99
+        
         class ranges:
-            lin_vel_x = [-1.0, 2.0] # min max [m/s]
-            lin_vel_y = [-0.3, 0.3]   # min max [m/s]
+            lin_vel_x = [-5.0, 5.0] # min max [m/s] - backward training may be insufficient due to asymmetric range
+            lin_vel_y = [-0.5, 0.5]   # min max [m/s]
             ang_vel_yaw = [-1.57, 1.57]    # min max [rad/s]
             heading = [-3.14, 3.14]
 

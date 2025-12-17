@@ -276,18 +276,16 @@ class LeggedRobot(BaseTask):
         if self.add_noise:
             self.privileged_obs_buf += (2 * torch.rand_like(self.privileged_obs_buf) - 1) * self.noise_scale_vec
 
-        # Remove parts of privileged obs when requested by cfg (policy obs).
-        if self.num_obs == self.num_privileged_obs - 5:
-            # drop base linear velocity (3) + command lin_vel x,y (2), keep yaw command
-            # keep the rest (angular vel, gravity, yaw command, dof_pos/vel, actions, heights if any)
-            self.obs_buf = torch.cat((self.privileged_obs_buf[:, 3:9],  # base_ang_vel(3) + projected_gravity(3)
-                                      self.privileged_obs_buf[:, 11:]), dim=-1)
-        elif self.num_obs == self.num_privileged_obs - 3:
-            # drop linear velocity (3 dims), keep angular velocity and all commands
+        # Remove velocity observations from policy observation when requested by cfg.
+        if self.num_obs == self.num_privileged_obs - 3:
+            # drop linear velocity (3 dims), keep angular velocity and commands
             self.obs_buf = self.privileged_obs_buf[:, 3:]
         elif self.num_obs == self.num_privileged_obs - 6:
-            # drop linear + angular velocity (6 dims) — original behavior
-            self.obs_buf = self.privileged_obs_buf[:, 6:]
+            # drop base_lin_vel (3 dims) + commands (3 dims) = 6 dims — for 42-dim observation
+            self.obs_buf = torch.cat((
+                self.privileged_obs_buf[:, 3:9],   # base_ang_vel + projected_gravity
+                self.privileged_obs_buf[:, 12:]    # dof_pos + dof_vel + actions
+            ), dim=-1)
         else:
             self.obs_buf = torch.clone(self.privileged_obs_buf)
 
@@ -399,6 +397,13 @@ class LeggedRobot(BaseTask):
         # 
         env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0).nonzero(as_tuple=False).flatten()
         self._resample_commands(env_ids)
+        
+        # Command平滑：每步将当前command平滑过渡到目标值
+        if self.command_targets is not None:
+            # 使用指数移动平均 (EMA) 平滑
+            # commands = alpha * commands + (1 - alpha) * command_targets
+            self.commands[:] = self.smooth_command_alpha * self.commands + (1.0 - self.smooth_command_alpha) * self.command_targets
+        
         if self.cfg.commands.heading_command:
             forward = quat_apply(self.base_quat, self.forward_vec)
             heading = torch.atan2(forward[:, 1], forward[:, 0])
@@ -415,15 +420,38 @@ class LeggedRobot(BaseTask):
         Args:
             env_ids (List[int]): Environments ids for which new commands are needed
         """
-        self.commands[env_ids, 0] = torch_rand_float(self.command_ranges["lin_vel_x"][0], self.command_ranges["lin_vel_x"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-        self.commands[env_ids, 1] = torch_rand_float(self.command_ranges["lin_vel_y"][0], self.command_ranges["lin_vel_y"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+        # 生成新的目标command
+        new_cmd_vx = torch_rand_float(self.command_ranges["lin_vel_x"][0], self.command_ranges["lin_vel_x"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+        new_cmd_vy = torch_rand_float(self.command_ranges["lin_vel_y"][0], self.command_ranges["lin_vel_y"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+        
         if self.cfg.commands.heading_command:
-            self.commands[env_ids, 3] = torch_rand_float(self.command_ranges["heading"][0], self.command_ranges["heading"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+            new_cmd_heading = torch_rand_float(self.command_ranges["heading"][0], self.command_ranges["heading"][1], (len(env_ids), 1), device=self.device).squeeze(1)
         else:
-            self.commands[env_ids, 2] = torch_rand_float(self.command_ranges["ang_vel_yaw"][0], self.command_ranges["ang_vel_yaw"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+            new_cmd_yaw = torch_rand_float(self.command_ranges["ang_vel_yaw"][0], self.command_ranges["ang_vel_yaw"][1], (len(env_ids), 1), device=self.device).squeeze(1)
 
-        # set small commands to zero
-        self.commands[env_ids, :2] *= (torch.norm(self.commands[env_ids, :2], dim=1) > 0.2).unsqueeze(1)
+        # Set small commands to zero (only applies to combined x-y velocity magnitude)
+        # This avoids tiny drift commands but allows pure backward motion
+        norm = torch.norm(torch.stack([new_cmd_vx, new_cmd_vy], dim=1), dim=1)
+        mask = norm > 0.2
+        new_cmd_vx *= mask
+        new_cmd_vy *= mask
+        
+        # 如果启用平滑，更新目标值而不是直接设置
+        if self.command_targets is not None:
+            self.command_targets[env_ids, 0] = new_cmd_vx
+            self.command_targets[env_ids, 1] = new_cmd_vy
+            if self.cfg.commands.heading_command:
+                self.command_targets[env_ids, 3] = new_cmd_heading
+            else:
+                self.command_targets[env_ids, 2] = new_cmd_yaw
+        else:
+            # 不平滑，直接设置（原始行为）
+            self.commands[env_ids, 0] = new_cmd_vx
+            self.commands[env_ids, 1] = new_cmd_vy
+            if self.cfg.commands.heading_command:
+                self.commands[env_ids, 3] = new_cmd_heading
+            else:
+                self.commands[env_ids, 2] = new_cmd_yaw
 
     def _compute_torques(self, actions):
         """ Compute torques from actions.
@@ -634,6 +662,14 @@ class LeggedRobot(BaseTask):
         self.last_root_vel = torch.zeros_like(self.root_states[:, 7:13])
         self.commands = torch.zeros(self.num_envs, self.cfg.commands.num_commands, dtype=torch.float, device=self.device, requires_grad=False) # x vel, y vel, yaw vel, heading
         self.commands_scale = torch.tensor([self.obs_scales.lin_vel, self.obs_scales.lin_vel, self.obs_scales.ang_vel], device=self.device, requires_grad=False,) # TODO change this
+        
+        # Command平滑：存储目标command，实际command会平滑过渡到目标值
+        if hasattr(self.cfg.commands, 'smooth_command_changes') and self.cfg.commands.smooth_command_changes:
+            self.command_targets = torch.zeros_like(self.commands)  # 目标command
+            self.smooth_command_alpha = getattr(self.cfg.commands, 'smooth_command_alpha', 0.95)  # 平滑系数
+        else:
+            self.command_targets = None
+            
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
         self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
