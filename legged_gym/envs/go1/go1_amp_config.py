@@ -140,8 +140,8 @@ class GO1AMPCfg( LeggedRobotCfg ):
         
         # Smooth command changes to simulate joystick input (important for Sim2Sim deployment)
         # When set to True, commands will smoothly transition within resampling_time instead of step changes
-        smooth_command_changes = False  # Enable smooth transition
-        smooth_command_alpha = 0.97    # Smoothing coefficient: new_cmd = alpha * old_cmd + (1-alpha) * target_cmd
+        smooth_command_changes = True  # Enable smooth transition
+        smooth_command_alpha = 0.99    # Smoothing coefficient: new_cmd = alpha * old_cmd + (1-alpha) * target_cmd
                                        # Higher alpha means smoother, recommended 0.9-0.99
         
         class ranges:

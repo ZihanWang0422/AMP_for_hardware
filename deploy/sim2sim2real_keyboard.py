@@ -63,39 +63,9 @@ class UnifiedConfig:
     # PD 增益
     kp_stand = 60.0      # 站立阶段
     kd_stand = 2.0
-    kp_walk = 80.0       # 行走阶段
-    kd_walk = 1.0
+    kp_walk = 40.0       # 行走阶段
+    kd_walk = 2.0
     
-    # 关节限位 (训练环境顺序: FL, FR, RL, RR)
-    joint_limit_low = np.array([
-        -0.8, -1.0, -2.7,   # FL
-        -0.8, -1.0, -2.7,   # FR
-        -0.8, -1.0, -2.7,   # RL
-        -0.8, -1.0, -2.7    # RR
-    ], dtype=np.float32)
-    
-    joint_limit_high = np.array([
-        0.8, 2.5, -0.9,    # FL
-        0.8, 2.5, -0.9,    # FR
-        0.8, 2.5, -0.9,    # RL
-        0.8, 2.5, -0.9     # RR
-    ], dtype=np.float32)
-    
-    # SDK 顺序的关节限位 (FR, FL, RR, RL) - 用于真机控制
-    # Go1 实际机械限位，参考: https://support.unitree.com/home/zh/Go1_developer
-    joint_limit_low_sdk = np.array([
-        -1.047, -0.663, -2.721,   # FR (hip, thigh, calf)
-        -1.047, -0.663, -2.721,   # FL
-        -1.047, -0.663, -2.721,   # RR
-        -1.047, -0.663, -2.721    # RL
-    ], dtype=np.float32)
-    
-    joint_limit_high_sdk = np.array([
-        1.047, 4.501, -0.837,    # FR
-        1.047, 4.501, -0.837,    # FL
-        1.047, 4.501, -0.837,    # RR
-        1.047, 4.501, -0.837     # RL
-    ], dtype=np.float32)
     
     # 站立/稳定阶段时间
     standup_duration = 2.0     # 站立阶段 (秒)
@@ -482,7 +452,6 @@ class Sim2SimController:
                 self.last_action = action[:12].copy()
                 
                 self.qDes = action[:12] * self.config.action_scale + self.config.default_dof_pos
-                self.qDes = np.clip(self.qDes, self.config.joint_limit_low, self.config.joint_limit_high)
             
             self.send_command(self.qDes)
 

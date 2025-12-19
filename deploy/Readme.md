@@ -5,7 +5,7 @@
 ### 运行命令
 进入 `deploy` 目录，运行：
 ```bash
-cd ./isaacgym/AMP_for_hardware/deploy/
+cd ./AMP_gym/deploy/
 conda activate amp_hw
 # Use keyboard to control
 python sim2sim2real_keyboard.py --mode sim --model policy_45_continus.pt  #play in mujoco
